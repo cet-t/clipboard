@@ -1,26 +1,18 @@
-use std::rc::Rc;
-
-#[derive(Debug, Clone)]
+﻿#[derive(Debug, Clone)]
 pub struct HistoryEntry {
     pub id: String,
     pub timestamp_ms: i64,
-    pub contents: Vec<Rc<Content>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Content {
-    pub format: String,
-    pub data: ContentData,
+    pub content: std::sync::Arc<ContentData>,
 }
 
 #[derive(Debug, Clone)]
 pub enum ContentData {
+    /// Text, HTML, RTF, URI and file paths (one per line).
     Text(String),
-    Html(String),
-    Rtf(String),
-    Uri(String),
-    Bitmap { mime: String, bytes: Vec<u8> },
-    Files(Vec<String>),
-    Bytes(Vec<u8>),
-    Unavailable,
+    Image {
+        mime: String,
+        bytes: Vec<u8>,
+    },
+    /// Any other format, or one that could not be read (empty).
+    Other(Vec<u8>),
 }

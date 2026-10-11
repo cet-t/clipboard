@@ -1,4 +1,4 @@
-//! These tests write to the real system clipboard and read it back through
+﻿//! These tests write to the real system clipboard and read it back through
 //! the Win+V history, so they require clipboard history to be enabled and
 //! they overwrite the current clipboard. They are serialized with a lock.
 
@@ -48,18 +48,8 @@ fn wait_newest(pred: impl Fn(&HistoryEntry) -> bool) -> HistoryEntry {
     }
 }
 
-fn find<'a>(e: &'a HistoryEntry, format: &str) -> &'a ContentData {
-    &e.contents
-        .iter()
-        .find(|c| c.format == format)
-        .unwrap_or_else(|| panic!("format {format} not found in {:?}", e.contents))
-        .data
-}
-
 fn has_text(e: &HistoryEntry, s: &str) -> bool {
-    e.contents
-        .iter()
-        .any(|c| matches!(&c.data, ContentData::Text(t) if t == s))
+    matches!(&*e.content, ContentData::Text(t) if t == s)
 }
 
 fn guard() -> std::sync::MutexGuard<'static, ()> {
@@ -95,7 +85,6 @@ fn history_is_readable() {
     assert!(!entries.is_empty());
     for e in &entries {
         assert!(!e.id.is_empty());
-        assert!(!e.contents.is_empty(), "entry {} has no formats", e.id);
     }
 }
 
@@ -106,7 +95,7 @@ fn text_round_trip() {
     set_clipboard(|p| p.SetText(&HSTRING::from(&text)));
 
     let e = wait_newest(|e| has_text(e, &text));
-    assert!(matches!(find(&e, "Text"), ContentData::Text(t) if *t == text));
+    assert!(has_text(&e, &text));
 }
 
 #[test]
@@ -126,12 +115,8 @@ fn html_round_trip() {
         HtmlFormatHelper::CreateHtmlFormat(&HSTRING::from(format!("<b>{marker}</b>"))).unwrap();
     set_clipboard(|p| p.SetHtmlFormat(&html));
 
-    let e = wait_newest(|e| {
-        e.contents
-            .iter()
-            .any(|c| matches!(&c.data, ContentData::Html(h) if h.contains(&marker)))
-    });
-    assert!(matches!(find(&e, "HTML Format"), ContentData::Html(h) if h.contains("<b>")));
+    let e = wait_newest(|e| matches!(&*e.content, ContentData::Text(h) if h.contains(&marker)));
+    assert!(matches!(&*e.content, ContentData::Text(h) if h.contains("<b>")));
 }
 
 #[test]
@@ -148,13 +133,9 @@ fn bitmap_round_trip() {
         p.SetBitmap(&RandomAccessStreamReference::CreateFromStream(&stream)?)
     });
 
-    let e = wait_newest(|e| {
-        e.contents
-            .iter()
-            .any(|c| matches!(c.data, ContentData::Bitmap { .. }))
-    });
-    match find(&e, "Bitmap") {
-        ContentData::Bitmap { mime, bytes } => {
+    let e = wait_newest(|e| matches!(*e.content, ContentData::Image { .. }));
+    match &*e.content {
+        ContentData::Image { mime, bytes } => {
             assert!(mime.starts_with("image/"), "unexpected mime {mime}");
             assert!(!bytes.is_empty());
         }

@@ -1,27 +1,33 @@
-use std::rc::Rc;
-
 use windows::ApplicationModel::DataTransfer::{DataPackageView, StandardDataFormats};
 use windows::Foundation::{IPropertyValue, PropertyType};
 use windows::Storage::Streams::{DataReader, IRandomAccessStream, RandomAccessStreamReference};
 use windows::core::{Array, Error, HSTRING, Interface, Result};
 
-use crate::entry::{Content, ContentData};
+use crate::entry::ContentData;
 use crate::sta::E_FAIL;
 
-pub(crate) fn read_all(view: &DataPackageView) -> Result<Vec<Rc<Content>>> {
-    view.AvailableFormats()?
-        .into_iter()
-        .map(|name| {
-            let data = match read_standard(view, &name) {
-                Ok(Some(data)) => data,
-                _ => read_raw(view, &name).unwrap_or(ContentData::Unavailable),
-            };
-            Ok(Rc::new(Content {
-                format: name.to_string(),
-                data,
-            }))
-        })
-        .collect()
+/// Reads one representative content: Text, then Image, then any other format.
+pub(crate) fn read_content(view: &DataPackageView) -> Result<ContentData> {
+    let text = StandardDataFormats::Text()?;
+    let bitmap = StandardDataFormats::Bitmap()?;
+    let mut formats: Vec<HSTRING> = view.AvailableFormats()?.into_iter().collect();
+    formats.sort_by_key(|f| match f {
+        f if *f == text => 0,
+        f if *f == bitmap => 1,
+        _ => 2,
+    });
+    for name in &formats {
+        match read_standard(view, name) {
+            Ok(Some(data)) => return Ok(data),
+            Ok(None) => {
+                if let Ok(data) = read_raw(view, name) {
+                    return Ok(data);
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    Ok(ContentData::Other(Vec::new()))
 }
 
 fn read_standard(view: &DataPackageView, name: &HSTRING) -> Result<Option<ContentData>> {
@@ -29,19 +35,19 @@ fn read_standard(view: &DataPackageView, name: &HSTRING) -> Result<Option<Conten
     if name == StandardDataFormats::Text()? {
         Ok(ContentData::Text(view.GetTextAsync()?.join()?.to_string()))
     } else if name == StandardDataFormats::Html()? {
-        Ok(ContentData::Html(
+        Ok(ContentData::Text(
             view.GetHtmlFormatAsync()?.join()?.to_string(),
         ))
     } else if name == StandardDataFormats::Rtf()? {
-        Ok(ContentData::Rtf(view.GetRtfAsync()?.join()?.to_string()))
+        Ok(ContentData::Text(view.GetRtfAsync()?.join()?.to_string()))
     } else if name == StandardDataFormats::Uri()? {
-        Ok(ContentData::Uri(
+        Ok(ContentData::Text(
             view.GetUriAsync()?.join()?.AbsoluteUri()?.to_string(),
         ))
     } else if name == StandardDataFormats::Bitmap()? {
         let stream = view.GetBitmapAsync()?.join()?.OpenReadAsync()?.join()?;
         let mime = stream.ContentType()?.to_string();
-        Ok(ContentData::Bitmap {
+        Ok(ContentData::Image {
             mime,
             bytes: read_stream(&stream)?,
         })
@@ -52,8 +58,8 @@ fn read_standard(view: &DataPackageView, name: &HSTRING) -> Result<Option<Conten
             .into_iter()
             .filter_map(|i| i.Path().ok())
             .map(|i| i.to_string())
-            .collect();
-        Ok(ContentData::Files(items))
+            .collect::<Vec<_>>();
+        Ok(ContentData::Text(items.join("\n")))
     } else {
         return Ok(None);
     }
@@ -73,10 +79,10 @@ fn read_stream(stream: &impl Interface) -> Result<Vec<u8>> {
 fn read_raw(view: &DataPackageView, name: &HSTRING) -> Result<ContentData> {
     let value = view.GetDataAsync(name)?.join()?;
     if let Ok(stream) = value.cast::<IRandomAccessStream>() {
-        return Ok(ContentData::Bytes(read_stream(&stream)?));
+        return Ok(ContentData::Other(read_stream(&stream)?));
     }
     if let Ok(reference) = value.cast::<RandomAccessStreamReference>() {
-        return Ok(ContentData::Bytes(read_stream(
+        return Ok(ContentData::Other(read_stream(
             &reference.OpenReadAsync()?.join()?,
         )?));
     }
@@ -105,5 +111,5 @@ fn read_raw(view: &DataPackageView, name: &HSTRING) -> Result<ContentData> {
             ));
         }
     };
-    Ok(ContentData::Bytes(bytes))
+    Ok(ContentData::Other(bytes))
 }
