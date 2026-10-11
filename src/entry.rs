@@ -1,8 +1,10 @@
+use std::rc::Rc;
+
 #[derive(Debug, Clone)]
 pub struct HistoryEntry {
     pub id: String,
     pub timestamp_ms: i64,
-    pub contents: Vec<Content>,
+    pub contents: Vec<Rc<Content>>,
 }
 
 #[derive(Debug, Clone)]

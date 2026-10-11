@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use windows::ApplicationModel::DataTransfer::{DataPackageView, StandardDataFormats};
 use windows::Foundation::{IPropertyValue, PropertyType};
 use windows::Storage::Streams::{DataReader, IRandomAccessStream, RandomAccessStreamReference};
@@ -6,7 +8,7 @@ use windows::core::{Array, Error, HSTRING, Interface, Result};
 use crate::entry::{Content, ContentData};
 use crate::sta::E_FAIL;
 
-pub(crate) fn read_all(view: &DataPackageView) -> Result<Vec<Content>> {
+pub(crate) fn read_all(view: &DataPackageView) -> Result<Vec<Rc<Content>>> {
     view.AvailableFormats()?
         .into_iter()
         .map(|name| {
@@ -14,10 +16,10 @@ pub(crate) fn read_all(view: &DataPackageView) -> Result<Vec<Content>> {
                 Ok(Some(data)) => data,
                 _ => read_raw(view, &name).unwrap_or(ContentData::Unavailable),
             };
-            Ok(Content {
+            Ok(Rc::new(Content {
                 format: name.to_string(),
                 data,
-            })
+            }))
         })
         .collect()
 }
